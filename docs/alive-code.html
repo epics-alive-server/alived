@@ -1,0 +1,327 @@
+<html>
+<head>
+  <title>Alive System Code Design</title>
+  <link rel="stylesheet" type="text/css" href="html-files/alive.css">
+  <style>
+    p + ul { padding: 0 0 0 1.5em }
+    
+    a { vertical-align:top }
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1 class="main">Alive System Code Design</h1>
+
+    <div class="name">Dohn Arms</div>
+    
+    <p>
+      All of the code for the alive system is written in C.  The alive
+      record module has no external dependencies other than EPICS
+      libraries and should build on any of the supported platforms for
+      EPICS.  The rest of the system has no external dependencies, and
+      was developed with the <b>gcc</b> compiler for Linux.
+    </p>
+        
+    <h2>Alive Record</h2><hr>
+        
+    <p>
+      The Alive record support has a fairly straightforward design.
+      It only needs a remote host IP address to be provided so it
+      knows where to send the heartbeat messages, and most other
+      fields have defaults that can be overrriden.  The heartbeat
+      functionality can be disabled, and it can requests that the
+      remote server read it's configuration information.  Its output
+      value is the number of heartbeats that have been sent, so it
+      increases over time.
+    </p>
+    <p>
+      It is a little different from a typical record in that it does
+      nothing when processed, as the sending of heartbeats is done
+      periodically according to a time interval set at startup.  This
+      is to prevent the record from flooding the remote server with
+      hearbeat packets in case something causes the record to process
+      constantly.
+    </p>
+    <p>
+      The record spawns a separate thread that handles requests
+      to its open TCP port.  When a connection is made, it checks to
+      see if the remote address corresponds to the central repository,
+      and if it doesn't closes it.  Otherwise, it ignores any input
+      and simply sends all of the environmental variables and
+      operating system dependant infomation before closing the
+      port.
+    </p>
+    <p>
+      The record sends operating system specific information to the
+      server when it is queried for configuration information, but
+      only for certain ones (more operating systems can be added in
+      the future): vxWorks, Linux, Windows, and MacOS.  For example,
+      the user account, user group, and host are sent for Linux IOCs.
+    </p>
+    
+    <h2>Alive Daemon</h2><hr>
+
+    <p>
+      The daemon is threaded in design.  The database server, its
+      major subsystem, utilizes multiple threads.  There are
+      also two access service threads, and a notification management
+      service thread (not fully implemented).
+    </p>
+    <p>
+      There are five different network access modes for the daemon:
+      <ul>
+        <li>Incoming IOC UDP heartbeat receiver, within database
+          subsystem.</li>
+        <li>Outgoing TCP connection to call IOCs back, for retrieving
+          the IOCs configuration information, within database
+          subsystem.</li>
+        <li>Control interface on an IPC socket, for the local control
+          program access.</li>
+        <li>Incoming TCP data query interface, which communicates
+          to the API library.</li>
+        <li>Incoming and outgoing UDP event notification interface,
+          which communicates to the API library, within notification
+          management subsystem (not fully implemented).</li>
+      </ul>
+    </p>
+    <p>
+      Additionally, there is a set of file system function calls, for
+      saving and retrieving boot state information, as well as logging
+      and retrieving IOC events.
+    </p>
+        
+    <h3>In-Memory Database Subsystem</h3>
+        
+    <p>
+      The daemon's primary job is to be a database server.  The
+      database is written as in-memory and online. It handles a
+      constant stream of heartbeat packets efficiently, and the
+      querying of the database needs to have little impact on this. It
+      periodically determines the states of the IOCs that it monitors,
+      by checking if the last heartbeat is outside the timeout window
+      (determined by threshold number of missing packets multiplied by
+      heartbeat period).
+    </p>
+
+    <!-- <img src="html-files/llrb.png" align="right"> -->
+
+    <p>
+      The database uses a key-value data store called a red-black
+      tree.  In particular, it is using a variant called the
+      <a href="html-files/LLRB.pdf">left-leaning red-black tree</a>, which
+      simplifies the implementation somewhat.
+    </p>
+    <p>
+      A red-black tree works well as it acts like a binary tree for
+      searching, which is fairly efficient.  For insertion, it will
+      force a good level of balancing for the data across the tree,
+      for reasonable amount of work and in any order the data is
+      added.  As with all autobalancing trees, deletion is not
+      trivial; it has to not unbalance the tree, but also leave it in
+      an expected configuration for future insertions.  The alive
+      database only does deletions when explictly told through the
+      control program, so large deletion overhead is not a problem.
+      The code is written using recursion to keep implementation
+      simple.
+    </p>
+    <p>
+      As there are many possible concurrent accesses to the database
+      across several threads, locking is enabled on the data store
+      with global and record locking.  Global implementation uses the
+      single writer-many reader model, with priority given to the
+      writer.  So, many readers can access the database at the same
+      time, but when a writer wantes to write, no more readers are
+      allowed access until the writer is finished.  The writer mode is
+      needed when a new IOC is added or an existing one is deleted.
+      Record locking is used along with reader access when information
+      is being changed for an existing IOC.
+    </p>
+    <p>
+      In order to remove manual locking of the database, all access to
+      the data store are done through function callbacks.  A function
+      is provided that does the necessary work with a data object, and
+      it is given to the data store to use with any matching data
+      object.  This does two things: it allows the locking to be done
+      by the datastore behind the scenes, and it forces the programmer
+      to minimize the time that any locking will be done.
+    </p>
+    <p>
+      When an IOC's data is accessed in the database, no blocking
+      behavior is allowed, which forces a need to copy the data for
+      its processing outside of the database.  However, making full
+      copies can become expensive.  Instead, shared buffers of the
+      information are used, which use reference counters. The database
+      gives a pointer to the shared buffer to the routine wanting
+      access, which will release it when it is done.  In the mean
+      time, if the record is updated, the database drops its reference
+      to the old version and creates a new one, leaving the old one
+      around until it has no references.
+    </p>
+    <p>
+      Separate process threads are started with the database, and this
+      is what they handle:
+      <ul>
+        <li>A permanent thread receives the hearbeat packets on a UDP
+          port, processes them, and applies the IOC information to the
+          data store.  It also can determine that an IOC is: newly up,
+          recovered, has a conflict, or has a new message value.</li>
+        <li>Temporary threads are generated when it's necessary to
+          contact an IOC's alive record on it's open TCP port, and
+          when it's necessary to write a IOC change of state to disk.
+          As network traffic and file writing can block, this can't be
+          done in the thread that accepts heartbeats, which needs to
+          process continuously.</li>
+        <li>A permanent thread periodically scans the database to see
+          if any IOCs have instances that timed out, possibly
+          resulting in determinations of IOC failure or conflict
+          resolution.</li>
+      </ul>
+    </p>
+    <p>
+      There are also several access functions, which remove the need
+      for interacting with callback functions, doing the following:
+      <ul>
+        <li>Database starting and stopping.</li>
+        <li>IOC general information retrieval.</li>
+        <li>IOC instances retrieval.</li>
+        <li>IOC conflict information retrieval.</li>
+        <li>IOC deletion.</li>
+      </ul>
+    </p>
+    
+    <h3>Event Notification Management Subsystem</h3>
+
+    <p><i>This feature is not fully implemented.</i></p>
+
+    <!--
+    <p>
+      When events are generated by the database, they need to be sent
+      to the event subscribers.  This process is done with a separate
+      process thread, and is done using a custom UDP networking
+      protocol.
+    </p>
+    <p>
+      The custom UDP protocol allows for a single port on the server
+      to communicate with multiple subscribers simultaneously, with no
+      worrying about TCP timeouts slowing down notification.  Each
+      event is sent as a single UDP packet to each subscriber, and
+      delivery is guaranteed through the use of acknowledgement
+      packets.  Each event packet contains the event and the full
+      information for that IOC, to allow flexible filtering of events
+      by the subscription client.
+    </p>
+    <p>
+      Subscription is accomplished by the client establishing a
+      connection.  Periodic heartbeats are subsequently sent by the
+      subscriber to the daemon to maintain its subscription; the
+      daemon's response lets the client know that the daemon is still
+      active. Unsubscribing for a subscriber is to simply stop sending
+      the heartbeats.
+    </p>
+    <p>
+      The subscriber entries are kept in a left-leaning red-black tree
+      for easy access and traversal (sharing that code with the main
+      database).  Each subscriber entry keeps a linked list of events
+      that need to be sent and acknowledged.
+    </p>
+    <p>
+      When an event arrives at the service, it's added to a global
+      linked list of events, as well as to each linked list of active
+      subscribers.  The service periodically sends event notifications
+      to outstanding events until they are acknowledged, otherwise it
+      eventually drops the subscriber.  Once an event acknowledged,
+      the subscriber entry will drop it from its linked list, and once
+      the number of references for an event is zero, it will be
+      dropped from the global linked list of events.
+    </p>
+    <p>
+      From the client point-of-view, the subscription process is done
+      through the alive C API.  A handler function is given to the API
+      that is run every time that an event is sent to the client, to
+      process the IOC event and information however it wants.
+    </p>
+
+-->
+    
+    <h3>Data Access</h3>
+    
+    <p>
+      Access to the database data is done through the alive C API,
+      which allows access over the network.  It can provide a full or
+      partial listing of the IOCs in the database, with their statuses
+      and details.  It can provide a more detailed representation for
+      an IOC, which can contain multiple recent IOC instances, and is
+      typically used for debugging or solving a naming conflict.
+      Lastly, it can provide a historical event listing for an IOC.
+    </p>
+    <p>
+      The API interface is designed to be simple to use.  The client
+      needs the server's IP address, and optionally IOC names.  The
+      data is returned as a array of structures, with the structure
+      layout corresponding to what was asked for.
+    </p>
+    <p>
+      In the daemon, a dedicated thread provides a TCP port that
+      allows connections.  If current information is requested for
+      IOCs, then a request is made to the in-memory database, where
+      shared pointers are used to provide a static snapshot of the
+      information before it is sent to the remote client.  If a
+      request is made for event data, then the event file for that IOC
+      is loaded off of disk and sent to the client.
+    </p>
+
+    <h3>On-Disk Database</h3>
+        
+    <p>
+      Data storage in a file system is needed for a couple reasons.
+      One is to allow a graceful restart of the daemon while the IOCs
+      are still running.  It is also used to log events for IOCs, as
+      there is no reason to keep that information in memory.
+    </p>
+    <p>
+      If the daemon is restarted while the IOCs are still running, the
+      states of all the IOCs in the network will be lost.  There is
+      then no way to detect a failure or reboot that occurs during the
+      restart of the daemon.  This is handled by keeping a simple
+      database on disk, in the form of a directory with a file for
+      each IOC. Whenever the daemon queries an IOC for its
+      configuration information, it will get written into that IOC's
+      file, along with the IOC active state; whenever IOC's state
+      changes, the status part of its file is overwritten.  When the
+      daemon starts, it will read all the files from the directory,
+      creating entries matching the file names, and populates each
+      entry with the data from its file.  This restores the identities
+      and information of all the IOCs, even if some are not currently
+      running.
+    </p>
+    <p>
+      The IOC events are logged into separate files for each IOC.  The
+      events are loged with the time, the IP address, and the user
+      message value.  These events can also be retrieved as part of a
+      user request for them.
+    </p>
+        
+    <h2>Alive Control Program</h2><hr>
+        
+    <p>
+      Once the daemon is started, it runs in the background.  There
+      has to be some method of communicating with it, which is done
+      using the control program.
+    </p>
+    <p>
+      In order to reduce the chance of accidental administrative
+      access of the database, an IPC socket is used and not a network
+      socket.  This way, access has to be done while logged into the
+      host running the daemon, and the host can be chosen so that it
+      has restricted access.
+    </p>
+    <p>
+      The code design itself is straightforward, and mostly relays
+      commands to the daemon and its responses back to the user.
+    </p>
+    
+  </div>
+  
+</body>
+</html>

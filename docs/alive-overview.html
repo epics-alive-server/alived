@@ -1,0 +1,243 @@
+<html>
+<head>
+  <title>Alive System Overview</title>
+  <link rel="stylesheet" type="text/css" href="html-files/alive.css">
+  <style>
+  </style>
+</head>
+<body>
+
+  <div class="container">
+    <h1 class="main">Alive System Overview</h1>
+
+    <div class="name">Dohn Arms</div>
+
+    <p>
+      The Alive system was created by the Beamline Controls
+      Group of the Advanced Photon Source at Argonne National
+      Laboratory, in order to monitor the EPICS IOCs for which it
+      is responsible.  This monitoring consists mainly of current
+      operational status and boot configuration parameters.
+      Clients access data by connecting with the systems's central
+      server over the network, and there are both command line and
+      web clients.  The system is designed to be a mission-critical
+      component of beamline operations, supporting several hundred
+      IOCs.
+    </p>
+       
+    <h2>Alive System Operation</h2><hr>
+      
+    <img src="html-files/alive.png" align="right">
+    
+    <p>
+      The Alive system is composed of several components, working
+      with each other over a network.  In the network diagram,
+      there are three layers.  The top layer contains the IOCs,
+      which can be running on dedicated hardware like VME or as
+      processes (single or multiple) on Linux hosts.  The middle
+      layer consists of alive services: the alive database server
+      and the CGI clients that reside at the web server.  The
+      bottom layer consists of the user clients, which can be web
+      clients or simple command line clients.
+    </p>
+    <p>
+      As EPICS IOCs compose a distributed control system consisting
+      of peer nodes with no leader, monitoring the IOCs involves
+      communication with each one.  Each IOC sends hearbeat
+      messages to a central alive server, and allows queries
+      about's its boot configuration; this is done with an alive
+      record on each IOC.
+    </p>
+    <p>
+      The central alive server communicates accepts heartbeats from
+      any IOC, will query IOCs for their boot parameters, and
+      stores the information in an in-memory database.  On this
+      same server as the daemon, a program can be run to locally
+      control or monitor the daemon's operations.  The server also
+      provides a networked API for accessing current and historical
+      values for each IOC.  The CGI clients on the web server use
+      this interface to create web pages.
+    </p>
+    <p>
+      Client programs run on other hosts, in two different ways,
+      both utilizing the alive API for communication.  The first
+      way is to read all or part of the current alive database,
+      while the second is to subscribe for event notifications when
+      there is a change in an IOC's status (this second way is not
+      fully operational right now).  The alive system comes with a
+      database client that allows full access to the data from the
+      command line.
+    </p>
+    <p>
+      The alive record is meant to be generic in nature, and the
+      operating system support for the Alive record is meant
+      to match those that EPICS supports.  The database server
+      code, which resides outside of EPICS, specifically targets
+      Linux and its design is tailored for the needs of our group.
+    </p>
+       
+    <h2>EPICS Record</h2><hr>
+        
+    <img src="html-files/aliveRecordEnvVars.png" align="right" style="margin-left:20;margin-top:20">
+    <img src="html-files/aliveRecord.png" align="right" style="margin-left:20;margin-top:20">
+        
+    <p>
+      This record is distributed as an optional module for EPICS,
+      and can be
+      found <a href="https://github.com/epics-modules/alive">online
+        at github</a>.  It is part of the synApps distribution
+      developed at the Advanced Photon Source.  To the right is a
+      screenshot of an active alive record's accessible information
+      (as seen through a screen for the EPICS graphical user
+      interface <b>medm</b>).
+    </p>
+    <p>
+      The alive module has no dependencies on other EPICS modules
+      or external libraries.  Complete documentation is provided
+      with the source, such as for
+      <a href="https://htmlpreview.github.io/?https://github.com/epics-modules/alive/blob/master/documentation/aliveRecord.html">
+        configuration and record use</a>, and
+      <a href="https://htmlpreview.github.io/?https://github.com/epics-modules/alive/blob/master/documentation/aliveServer.html">
+        network protocol implementation</a> for creating your own
+      heartbeat monitoring program (on the central server).
+    </p>
+    <p>
+      The record's main job is to send UDP heartbeat packets to the
+      remote server at a fixed interval (with a default of 15
+      seconds), to let it know that the IOC is still running.  It
+      also listens on a TCP port that allows the remote server to
+      retrieve all the environment variable data along with
+      operating system dependent data.
+    </p>
+    <p>
+      The heartbeat packets contain the IOC's name, the boot time
+      (or incarnation), the current time, the IP address of the
+      IOC, the UDP port used to send the packets, a user-defined
+      64-bit integer message, and other information.  The
+      combination of IP address, port, and incarnation provide a
+      unique identifier for any particular instance of an IOC,
+      allowing multiple instances running with the same IOC name to
+      be identified (a conflict).  As these are UDP packets, the
+      record does not need to care whether they make it to the
+      remote server or not, and will send them regardless of
+      whether the network or server is up or down.
+    </p>
+    <p>
+      The alive record will only respond to the remote server on
+      the TCP port, to reduce chances of interference due to
+      probing from other computers.  When the remote server
+      connects, the alive record will not read anything but rather
+      write all of its information and then close the port, not
+      allowing the remote host to keep the port open.  The data
+      sent is the names and values of the environment variables
+      that are specified in the alive record's fields, as well as
+      the operating system dependent infomation, which can be about
+      the user account and machine used to start the IOC for a
+      server or the boot parameters for an embedded system.
+    </p>
+    <p>
+      The 64-bit integer message value that is sent with the
+      hearbeats is intended to have a generic use, although it is
+      meant for conveying additional status values.  The user
+      defines the meaning of it, and how to respond to its values.
+      In our case, we have started using bits of the value as error
+      flags as caught by other records.
+    </p>
+          
+    <h2>Database Daemon</h2><hr>
+
+    <p>
+      The alive database is provided by the alive daemon,
+      <b>alived</b>, which runs on an independent server.
+    </p>
+    <p>
+      The daemon accepts the heartbeats on a UDP port from the
+      alive records of any IOC.  The daemon drops invalid packets,
+      and the correct ones are checked against the internal
+      database. If valid heartbeat's IOC has never been seen
+      before, it is added, otherwise the existing IOC is updated.
+      If the IOC has a new instance (such as from rebooting or
+      moving to a new host), the IOC's alive record is then
+      contacted on its advertised TCP port, and its environment
+      variables and operating system dependent information are
+      retrieved and updated in the database.
+    </p>
+    <p>
+      The deamon determines the IOC's running state from its
+      heartbeats.  If an IOC has not sent a heartbeat within a
+      certain number of periods (with the period interval sent in
+      the most recent valid heartbeat), the IOC is considered
+      failed; otherwise it is considered to be up and running.  If
+      there are multiple instances of an IOC considered up that
+      have heartbeats which interleave in time, then the IOC is
+      considered to be in conflict (such as starting the same IOC
+      twice); care has to be taken as a rebooted IOC will have two
+      instances considered up (as the previous one has not timed
+      out), but this normal situation can be identified as the
+      heartbeats of the earlier instance strictly come before those
+      of the later instance.
+    </p>
+    <p>
+      Events for an IOC are also generated by the heartbeats.
+      These are recorded for future reference with event time, IP
+      address, and message value. They are:
+      <ul>
+        <li>BOOT: New instance has started.</li>
+        <li>FAIL: Last instance no longer sending heartbeats.</li>
+        <li>RECOVER: Instance previously considered failed has
+          sent a new heartbeat.  Happens when there are network
+          issues.</li>
+        <li>MESSAGE: A new message value has been sent.</li>
+        <li>CONFLICT_START: Multiple instances are running
+          concurrently.</li>
+        <li>CONFLICT_STOP: Conflict is over, as only one instance is
+          determined to be active.</li>
+      </ul>
+    </p>
+      
+    <h2>Control Program</h2><hr>
+        
+    <p>
+      The daemon runs in the background of the server, and has a
+      special control program.  The program communicates with the
+      daemon through an IPC socket, so the program has to be run
+      locally on the daemon's host.
+    </p>
+    <p>
+      The control program can stop the daemon, directly query the
+      database, take database snapshots, and present debugging
+      information.  Snapshots are text data files, and can be taken
+      periodically in order to create a historical record that can
+      be analyzed.
+    </p>
+
+    <h2>Client API</h2><hr>
+        
+    <p>
+      The IOC information can be retrieved remotely for clients
+      using the alive API library.  This library allows the client
+      to retrieve information of several types:
+      <ul>
+        <li>The current IOC operational status, as well as the
+          environment variable and operating system dependent
+          data.</li>
+        <li>The IOC event history.</li>
+        <li>The IOC conflict information detailing the instances
+          in conflict.</li>
+        <li>A list of all IOC instances seen for a period of time,
+          active or not.</li>
+      </ul>
+    </p>
+    <p>
+      Event notification will also handled by the alive API, but it
+      works differently.  Instead of requesting the data, the
+      client asks for a subscription along with a callback
+      subroutine.  Whenever an event occurs, the daemon sends the
+      event and operational information to the subscribers.  This
+      system is not fully operational at this point.
+    </p>
+
+  </div>
+  
+</body>
+</html>

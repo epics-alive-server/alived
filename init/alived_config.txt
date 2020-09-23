@@ -1,0 +1,19 @@
+
+heartbeat_udp_port     5678
+database_tcp_port      5679
+subscription_udp_port  5680
+
+# number of missing heartbeats for determining failure
+fail_number_heartbeats  4
+# seconds between checking for IOC failures
+fail_check_period 60
+
+# seconds that a failed instance's information is kept
+instance_retain_time 3600
+
+log_file         "/local/alived/log.txt"
+event_file       "/local/alived/events.txt"
+info_file        "/local/alived/info.txt"
+control_socket   "/local/alived/control_socket"
+event_dir        "/local/alived/event"
+state_dir        "/local/alived/state"
