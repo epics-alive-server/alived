@@ -1,28 +1,25 @@
 
 
-ifndef OVERRIDE
-  USER = $(shell whoami)
-  ifeq ($(USER),iocmon)
-    Cfg_File = /home/beams/IOCMON/alive/alived_config.txt
-    Def_Server = 164.54.100.11
-  else
-    Cfg_File = /home/beams/DOHNARMS/epicsdev/software/alive/daemon/init/alived_config.txt
-    Def_Server = 164.54.104.70
-  endif
+# Set these variables in top level Makefile.
+# These are safety defaults.
+ifndef Cfg_File
+  Cfg_File = $(HOME)/alive/alived_config.txt
+endif
+ifndef Def_Server
+  Def_Server = localhost
+endif
+ifndef Def_DB_Port
   Def_DB_Port = 5679
 endif
 
 
-################
-
 CC = gcc -Wall
-#CC = gcc -g -Wall
-
 AR = ar
-
 CFLAGS = -O2
+
 # for debugging
-#CFLAGS += -g
+# CFLAGS += -g
+
 
 
 .PHONY: all

@@ -8,18 +8,24 @@ lib_dir        = $(prefix)/lib
 
 
 # Default configuration file location for alived, alivectl, and tools
-export Cfg_File = /home/dohnarms/.alive/alived_config.txt
+Cfg_File = $(HOME)/alive/alived_config.txt
 
+# Settings for clients, currently just alivedb
 # Default server IP address
-export Def_Server = 10.0.0.10
+Def_Server = localhost
 # Default server database port
-export Def_DB_Port = 5679
+Def_DB_Port = 5679
 
+
+-include LocalOptions
 
 
 #####################################################
 
-export OVERRIDE = 1
+export Cfg_File
+export Def_Server
+export Def_DB_Port
+
 
 .PHONY : all clean install uninstall
 
