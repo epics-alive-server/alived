@@ -1,15 +1,8 @@
 
 
-# Set these variables in top level Makefile.
-# These are safety defaults.
+# Safety default
 ifndef Cfg_File
   Cfg_File = $(HOME)/alive/alived_config.txt
-endif
-ifndef Def_Server
-  Def_Server = localhost
-endif
-ifndef Def_DB_Port
-  Def_DB_Port = 5679
 endif
 
 
@@ -23,7 +16,7 @@ CFLAGS = -O2
 
 
 .PHONY: all
-all: alived alivectl alivedb event_dump libaliveclient.a
+all: alived alivectl event_dump
 
 
 alived: alived.o llrb_db.o iocdb.o iocdb_access.o utility.o logging.o gentypes.o notifydb.o config_parse.o
@@ -54,17 +47,6 @@ alivectl.o: alivectl.c
 alivectl: alivectl.o config_parse.o
 	$(CC) alivectl.o config_parse.o -o alivectl 
 
-
-alive_client.o: alive_client.c alive_client.h
-	$(CC) $(CFLAGS) -DDEF_SERVER=\"$(Def_Server)\" -DDEF_DB_PORT=$(Def_DB_Port) -c alive_client.c
-libaliveclient.a: alive_client.o alive_client.h
-	$(AR) rcs libaliveclient.a alive_client.o
-
-alivedb.o: alivedb.c alive_client.h
-	$(CC) $(CFLAGS) -DDB_SERVER=\"$(Def_Server)\" -c alivedb.c
-alivedb: alivedb.o libaliveclient.a
-	$(CC) alivedb.o libaliveclient.a -o alivedb
-
 event_dump.o: event_dump.c
 	$(CC) $(CFLAGS) -c event_dump.c
 event_dump: event_dump.o config_parse.o
@@ -72,5 +54,5 @@ event_dump: event_dump.o config_parse.o
 
 .PHONY: clean
 clean:
-	-rm alived alivectl alivedb event_dump libaliveclient.a *.o
+	-rm alived alivectl event_dump *.o
 

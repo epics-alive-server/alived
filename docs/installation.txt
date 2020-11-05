@@ -1,23 +1,19 @@
-alived - APS Alive Daemon
+Alive Daemon for the APS Alive System
+
 
 Installation Notes
 ------------------
 
-
 All the code is C, and requires no external libraries.  It build with
-gcc, make, and ar.
+gcc and make.
 
 Before building, some defaults need to be changed in the top-level
 Makefile.  The first set of defaults are the standard installation
-directories; if you don't plan to use "make" to install the files, you
-can ignore these.  The "system_bin_dir" directory is where to install
-alived and its direct tools (local to the administrator), while
-"bin_dir" is where clients are installed (accessible across the
-network). The next default, "Cfg_File" specifies the default location
-for the system configuration file, needed by alived and its direct
-tools; this is built into the programs.  Lastly, "Def_Server", and
-"Def_DB_Port" specify the default server IP address and database port
-for the user clients, which are built into the programs.
+directories, typically modified by changing the "prefix" value; if you
+don't plan to use "make" to install the files, you can ignore
+this. The other default, "Cfg_File" specifies the default location for
+the system configuration file, needed by alived and its direct tools;
+this is built into the programs.
 
 Install the configuration file alived_config.txt (from the init
 directory) into the location specified by "Cfg_File", as it holds
@@ -32,13 +28,15 @@ Run "make" in the top-level directory, and you have four executables.
 - alivectl is a tool program for controlling the daemon
 - event_dump is a auxiliary tool program that dumps the binary event
   files for an IOC 
-- alivedb is a networked command line database client
 
-If you want to have make install the binaries, library, and header
-file, then run "make install".  The account running this must be able
-to install into the locations specified in the Makefile.  To remove
-them, similarly run "make uninstall".
+If you want to have make install the executables, then run "make
+install".  The account running this must be able to install into the
+locations specified in the Makefile.  To remove them, similarly run
+"make uninstall".
 
+
+Usage Notes
+-----------
 
 To start the daemon, you can just run "alived" or run it with a
 configuration file. Here's the help:
@@ -92,43 +90,10 @@ MESSAGE is when the value in the .MSG field of the alive record is
 changed.
 
 
-The daemon has a network client API for this ("libaliveclient.a"
-library and "alive_client.h" header file).  An included client that
-can access the database is "alivedb". There is also a web client that
-uses CGI, but that is provided as a separate package.
+Clients
+-------
 
-
-"alivedb" can access all the useful information the the database, and
-it uses the API.  Here's its help:
-
-Usage: alivedb [-h] [-r (server)[:(port)] ] [-s | -e (var) | -p (param)]
-       ( . | (ioc1) [ioc2] [...] | (-l|-d|-c) (ioc) )
-Prints out information from alive database.
-To print entire database, give '.' as an argument.
-  -h  Show this help screen.
-  -v  Show version.
-  -r  Set the remote host and optionally the port.
-  -l  Print out event list for the specified IOC.
-  -d  Print out debug information for the specified IOC.
-  -c  Print out conflict information for the specified IOC.
-  -s  Print out only status information.
-  -e  Print out only the environment variable specified.
-  -p  Print out only the operating system specific parameter specified.
-      Parameter is of form os:parameter
-        vxworks: boot_device, unit_number, processor_number, boot_host_name,
-          boot_file, address, backplane_address, boot_host_address,
-          gateway_address, flags, target_name, startup_script, other
-        linux: user, group, hostname
-        darwin: user, group, hostname
-        windows: user, machine
-
-It can generate a listing of varying amounts of information for all
-IOCS (using ".") or some of them (by specifying their names).  It can
-also return all the events for an IOC (read from the events directory
-for that IOC). It can print out the value of an environment variable
-or a operating system parameter (for use in scripts).
-
-The states for an IOC is up, down, conflict, or unknown (right after
-the daemon is started).
-
+The daemon has a network client API library and a default client,
+alivedb, which are included in a different package.  They can be
+built and installed without installing the daemon.
 
